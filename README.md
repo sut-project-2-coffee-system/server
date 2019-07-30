@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/sut-project-2-coffee-system/server.svg?branch=master)](https://travis-ci.com/sut-project-2-coffee-system/server)
+
 # Dialogflow Fulfillment Webhook Template for Node.js and Cloud Functions for Firebase
 
 This webhook template sets up everything needed to build fulfillment for your Dialogflow agent.
