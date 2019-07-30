@@ -7,8 +7,8 @@ node_js:
 branches:
   only: 
   - master # auto build and deploy in only master branch
+before_script: cd functions
 script: # run after installed
-- cd functions
 - npm install # install node module
 - npm run build # build project
 install:
