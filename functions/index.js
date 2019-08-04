@@ -1,78 +1,122 @@
-// Copyright 2017, Google, Inc.
-// Licensed under the Apache License, Version 2.0 (the 'License');
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an 'AS IS' BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Dialogflow fulfillment getting started guide:
-// https://dialogflow.com/docs/how-tos/getting-started-fulfillment
-
 'use strict';
 
 const functions = require('firebase-functions');
-const {WebhookClient} = require('dialogflow-fulfillment');
-const {Card, Suggestion} = require('dialogflow-fulfillment');
+const { WebhookClient } = require('dialogflow-fulfillment');
+const { Card, Suggestion } = require('dialogflow-fulfillment');
+const request = require("request-promise");
+const crypto = require('crypto');
+const secret = '442856b88bad478ad8e2d4e54fdd20f2';
 
+
+
+
+const LINE_MESSAGING_API = "https://api.line.me/v2/bot/message";
+const LINE_HEADER = {
+  "Content-Type": "application/json",
+  "Authorization": "Bearer gEIeipovFZMLDya4PobyyeLzJiH98XBs6q7fxyhCnUR2wzx2aUVPfy0nEbYBpuYw2Iq9ha1BdcOqawC7ltV8w1DeFp2a2DfcyHUrvpliCtEOaMrvv/M+EeieblUV9b7LvBa8xq7iciSD5K8NMZJkTwdB04t89/1O/w1cDnyilFU="
+};
 process.env.DEBUG = 'dialogflow:debug'; // enables lib debugging statements
+
 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
   const agent = new WebhookClient({ request, response });
   console.log('Dialogflow Request headers: ' + JSON.stringify(request.headers));
   console.log('Dialogflow Request body: ' + JSON.stringify(request.body));
 
-  function welcome (agent) {
+  function welcome(agent) {
     agent.add(`Welcome to my agent!`);
   }
 
-  function fallback (agent) {
+  function fallback(agent) {
     agent.add(`I didn't understand`);
     agent.add(`I'm sorry, can you try again?`);
   }
 
-  function getMenu(agent) {
-    agent.add(`มี คาปูชิโน่`);
+  function getReg(agent) {
+    //agent.add(`มี คาปูชิโน่ EMU Run`); 
+    const userId = request.body.originalDetectIntentRequest.payload.data.source.userId
+    agent.add(userId)
   }
 
-  // // Uncomment and edit to make your own intent handler
-  // // uncomment `intentMap.set('your intent name here', yourFunctionHandler);`
-  // // below to get this function to be run when a Dialogflow intent is matched
-  // function yourFunctionHandler(agent) {
-  //   agent.add(`This message is from Dialogflow's Cloud Functions for Firebase inline editor!`);
-  //   agent.add(new Card({
-  //       title: `Title: this is a card title`,
-  //       imageUrl: 'https://dialogflow.com/images/api_home_laptop.svg',
-  //       text: `This is the body text of a card.  You can even use line\n  breaks and emoji! 💁`,
-  //       buttonText: 'This is a button',
-  //       buttonUrl: 'https://docs.dialogflow.com/'
-  //     })
-  //   );
-  //   agent.add(new Suggestion(`Quick Reply`));
-  //   agent.add(new Suggestion(`Suggestion`));
-  //   agent.setContext({ name: 'weather', lifespan: 2, parameters: { city: 'Rome' }});
-  // }
-
-  // // Uncomment and edit to make your own Google Assistant intent handler
-  // // uncomment `intentMap.set('your intent name here', googleAssistantHandler);`
-  // // below to get this function to be run when a Dialogflow intent is matched
-  // function googleAssistantHandler(agent) {
-  //   let conv = agent.conv(); // Get Actions on Google library conv instance
-  //   conv.ask('Hello from the Actions on Google client library!'); // Use Actions on Google library
-  //   agent.add(conv); // Add Actions on Google library responses to your agent's response
-  // }
-
-  // Run the proper function handler based on the matched Dialogflow intent name
   let intentMap = new Map();
   intentMap.set('Default Welcome Intent', welcome);
   intentMap.set('Default Fallback Intent', fallback);
-  intentMap.set('Menu', getMenu);
+  intentMap.set('Registration', getReg);
   // intentMap.set('<INTENT_NAME_HERE>', yourFunctionHandler);
   // intentMap.set('<INTENT_NAME_HERE>', googleAssistantHandler);
   agent.handleRequest(intentMap);
 });
+
+
+exports.LineAdapter = functions.https.onRequest((req, res) => {
+  if (req.method === "POST") {
+    let event = req.body.events[0]
+    if (event.type === "message" && event.message.type === "text") {
+
+      postToDialogflow(req);
+      //reply(req);
+    }
+    else if (event.type === "message" && event.message.type === "location") {
+      if (event.message.title == undefined)
+        event.message.title = "ไม่มีสถานที่เด่น ,"
+      else
+        event.message.title = event.message.title + ", "
+      req.body.events[0] =
+        {
+          "type": event.type,
+          "replyToken": event.replyToken,
+          "source": {
+            "userId": event.source.userId,
+            "type": event.source.type
+          },
+          "timestamp": event.timestamp,
+          "message": {
+            "type": "text",
+            "id": event.message.id,
+            "text": event.message.title + event.message.address + ", latitude : " + event.message.latitude + ", longitude : " + event.message.longitude,
+          }
+        }
+
+      const hash = crypto.createHmac('sha256', secret)
+        .update(JSON.stringify(req.body))
+        .digest('base64');
+
+      console.log(hash);
+
+      req.headers["x-line-signature"] = hash
+      postToDialogflow(req);
+      reply(req);
+    }
+    else {
+      //reply(req);
+    }
+  }
+  return res.status(200).send(req.method);
+});
+
+const reply = req => {
+  console.log(JSON.stringify(req.headers) + JSON.stringify(req.body));
+
+  return request.post({
+    uri: `${LINE_MESSAGING_API}/reply`,
+    headers: LINE_HEADER,
+    body: JSON.stringify({
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "text",
+          text: req.body.events[0].message.text
+        }
+      ]
+    })
+  });
+};
+
+const postToDialogflow = req => {
+  req.headers.host = "bots.dialogflow.com";
+  return request.post({
+    uri: "https://bots.dialogflow.com/line/2030fdf2-c8f1-43af-b6e5-23a1159a593d/webhook",
+    headers: req.headers,
+    body: JSON.stringify(req.body)
+  });
+};
