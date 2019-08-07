@@ -3,10 +3,14 @@
 const functions = require('firebase-functions');
 const { WebhookClient } = require('dialogflow-fulfillment');
 const { Card, Suggestion } = require('dialogflow-fulfillment');
+const admin = require('firebase-admin');
 const request = require("request-promise");
 const crypto = require('crypto');
 const secret = '442856b88bad478ad8e2d4e54fdd20f2';
-
+admin.initializeApp({
+  credential: admin.credential.applicationDefault(),
+  databaseURL: "https://coffe-system-yiakpd.firebaseio.com"
+});
 
 
 
@@ -38,14 +42,46 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     agent.add(userId)
   }
 
-  let intentMap = new Map();
-  intentMap.set('Default Welcome Intent', welcome);
-  intentMap.set('Default Fallback Intent', fallback);
-  intentMap.set('Registration', getReg);
-  // intentMap.set('<INTENT_NAME_HERE>', yourFunctionHandler);
-  // intentMap.set('<INTENT_NAME_HERE>', googleAssistantHandler);
-  agent.handleRequest(intentMap);
-});
+  function checkMenu(agent) {
+    let menuName = request.body.queryResult.parameters.name
+    agent.add("กำลังตรวจสอบเมนู " + menuName);
+    /* return admin.database().ref("menu").once("value").then(snapshot => {
+
+      snapshot.forEach(function (childSnapshot) {
+        var childKey = childSnapshot.key;
+        var childData = childSnapshot.val();
+        //agent.add(childKey + ", " + childData)
+
+        if(childData.name == menuName){
+          agent.add("พบเมนูแล้ว")
+        }
+      });
+    }); */
+    return admin.database().ref('menu').orderByChild("name").equalTo(menuName).on('value', function (snapshot) {
+      //snapshot would have list of NODES that satisfies the condition
+      agent.add("พบแล้ว")
+      agent.add(JSON.stringify(snapshot.val()))
+
+      snapshot.forEach(function (childSnapshot) {
+        var childKey = childSnapshot.key;
+        var childData = childSnapshot.val();
+        agent.add(childKey + ", " + childData)
+      });
+
+    });
+  } 
+
+    
+
+    let intentMap = new Map();
+    intentMap.set('Default Welcome Intent', welcome);
+    intentMap.set('Default Fallback Intent', fallback);
+    intentMap.set('Registration', getReg);
+    intentMap.set('Order', checkMenu);
+    // intentMap.set('<INTENT_NAME_HERE>', yourFunctionHandler);
+    // intentMap.set('<INTENT_NAME_HERE>', googleAssistantHandler);
+    agent.handleRequest(intentMap);
+  });
 
 
 exports.LineAdapter = functions.https.onRequest((req, res) => {
@@ -120,3 +156,4 @@ const postToDialogflow = req => {
     body: JSON.stringify(req.body)
   });
 };
+
