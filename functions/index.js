@@ -1,7 +1,7 @@
 'use strict';
 
 const functions = require('firebase-functions');
-const { WebhookClient } = require('dialogflow-fulfillment');
+const { WebhookClient, Payload } = require('dialogflow-fulfillment');
 const { Card, Suggestion } = require('dialogflow-fulfillment');
 const admin = require('firebase-admin');
 const request = require("request-promise");
@@ -20,12 +20,26 @@ const LINE_HEADER = {
   "Authorization": "Bearer gEIeipovFZMLDya4PobyyeLzJiH98XBs6q7fxyhCnUR2wzx2aUVPfy0nEbYBpuYw2Iq9ha1BdcOqawC7ltV8w1DeFp2a2DfcyHUrvpliCtEOaMrvv/M+EeieblUV9b7LvBa8xq7iciSD5K8NMZJkTwdB04t89/1O/w1cDnyilFU="
 };
 process.env.DEBUG = 'dialogflow:debug'; // enables lib debugging statements
-
+let order = {
+  "orderBy": "",
+  "orderKeyList": [],
+  "location1": "",
+  "location2": "",
+  "tel": "",
+  "status": "wait"
+}
+let orderList = {}
+let menuList = {}
+let total = {}
 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
   const agent = new WebhookClient({ request, response });
   console.log('Dialogflow Request headers: ' + JSON.stringify(request.headers));
   console.log('Dialogflow Request body: ' + JSON.stringify(request.body));
+  const userId = request.body.originalDetectIntentRequest.payload.data.source.userId
+  orderList[userId] = order
+  //menuList[userId] = []
+  //total[userId] = ""
 
   function welcome(agent) {
     agent.add(`Welcome to my agent!`);
@@ -37,51 +51,269 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   }
 
   function getReg(agent) {
-    //agent.add(`มี คาปูชิโน่ EMU Run`); 
-    const userId = request.body.originalDetectIntentRequest.payload.data.source.userId
     agent.add(userId)
+  }
+  function getOrder(agent) {
+    agent.add(JSON.stringify(orderList[userId]))
+    agent.add(JSON.stringify(menuList[userId]))
+    agent.add(JSON.stringify(total[userId]))
   }
 
   function checkMenu(agent) {
     let menuName = request.body.queryResult.parameters.name
-    agent.add("กำลังตรวจสอบเมนู " + menuName);
-    /* return admin.database().ref("menu").once("value").then(snapshot => {
+    let amount = request.body.queryResult.parameters.amount
+    let note = (request.body.queryResult.parameters.note == undefined ? "" : request.body.queryResult.parameters.note);
 
-      snapshot.forEach(function (childSnapshot) {
-        var childKey = childSnapshot.key;
-        var childData = childSnapshot.val();
-        //agent.add(childKey + ", " + childData)
+    return getMenuKey(menuName).then((data) => {
+      //saveOrder(userId, data)
+      console.log(data);
 
-        if(childData.name == menuName){
-          agent.add("พบเมนูแล้ว")
+      orderList[userId].orderKeyList.push(
+        {
+          "key": data.key,
+          "amount": amount + "",
+          "note": note
         }
-      });
-    }); */
-    return admin.database().ref('menu').orderByChild("name").equalTo(menuName).on('value', function (snapshot) {
-      //snapshot would have list of NODES that satisfies the condition
-      agent.add("พบแล้ว")
-      agent.add(JSON.stringify(snapshot.val()))
+      )
 
-      snapshot.forEach(function (childSnapshot) {
-        var childKey = childSnapshot.key;
-        var childData = childSnapshot.val();
-        agent.add(childKey + ", " + childData)
-      });
+      menuList[userId] = (menuList[userId] == null ? [] : menuList[userId])
+      menuList[userId].push(
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": menuName,
+              "align": "start"
+            },
+            {
+              "type": "text",
+              "text": amount + "",
+              "align": "end"
+            },
+            {
+              "type": "text",
+              "text": data.price + "",
+              "align": "end"
+            }
+          ]
+        }
+      )
+      total[userId] = (total[userId] == 0 ? 0 : total[userId])
+      total[userId] = total[userId] + (amount * data.price)
+      agent.add("บันทึกเมนู " + menuName + " จำนวน " + amount + " " + note + " เรียบร้อยแล้ว")
+      agent.add(sendAsPayload({
+        "type": "template",
+        "altText": "ข้อความยืนยัน",
+        "template": {
+          "type": "confirm",
+          "actions": [
+            {
+              "type": "message",
+              "label": "ใช่",
+              "text": "ใช่"
+            },
+            {
+              "type": "message",
+              "label": "ไม่",
+              "text": "ไม่"
+            }
+          ],
+          "text": "คุณต้องการสั่งเพิ่มเติมหรือไม่ ?"
+        }
+      }))
 
-    });
-  } 
+    },
+      (err) => {
+        agent.add(err)
+      })
 
+  }
+
+  function askName(agent) {
+    let username = request.body.queryResult.parameters.username
+    orderList[userId].orderBy = username
+    agent.add("บันทึกชื่อของคุณ " + username + " เรียบร้อยแล้ว")
+    agent.add("กรุณาบอก เบอร์มือถือของคุณด้วย")
+  }
+
+  function askTel(agent) {
+    let tel = request.body.queryResult.parameters.tel
+    orderList[userId].tel = tel
+    agent.add("บันทึกเบอร์ของคุณ " + tel + " เรียบร้อยแล้ว")
+    agent.add("กรุณาส่ง ที่อยู่ของคุณด้วย")
+  }
+
+  function askLo1(agent) {
+    let lat = request.body.queryResult.parameters.lat
+    let long = request.body.queryResult.parameters.long
+    let location = request.body.queryResult.parameters.location
+
+    orderList[userId].location1 = location
+    agent.add("บันทึกที่อยู่ของคุณ " + location + " เรียบร้อยแล้ว")
+    agent.add("กรุณาส่ง ที่อยู่เพิ่มเติมของคุณด้วย")
+  }
+  function askLo2(agent) {
+    let more = request.body.queryResult.parameters.more
+    orderList[userId].location2 = more
+    agent.add("บันทึกข้อมูลเพิ่มเติมของคุณ " + more + " เรียบร้อยแล้ว")
+
+    agent.add("สรุป ออเดอร์ของคุณคือ ")
+
+    //agent.add(JSON.stringify(orderList[userId]))
+    console.log(JSON.stringify(menuList[userId]))
+    console.log(total[userId]);
     
+    agent.add(sendAsPayload(
+      {
+        "type": "flex",
+        "altText": "Flex Message",
+        "contents": {
+          "type": "bubble",
+          "direction": "ltr",
+          "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+              {
+                "type": "text",
+                "text": "รายละเอียด",
+                "align": "center",
+                "weight": "bold",
+                "color": "#000000"
+              }
+            ]
+          },
+          "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+              {
+                "type": "box",
+                "layout": "baseline",
+                "contents": [
+                  {
+                    "type": "text",
+                    "text": "เมนู",
+                    "align": "start",
+                    "weight": "bold"
+                  },
+                  {
+                    "type": "text",
+                    "text": "จำนวน",
+                    "align": "end",
+                    "weight": "bold"
+                  },
+                  {
+                    "type": "text",
+                    "text": "ราคา",
+                    "align": "end",
+                    "weight": "bold"
+                  }
+                ]
+              },
+              {
+                "type": "box",
+                "layout": "vertical",
+                "contents": menuList[userId]
+              },
+              {
+                "type": "text",
+                "text": "รวม :  " + total[userId] + " บาท",
+                "align": "end"
+              }
+            ]
+          },
+          "footer": {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+              {
+                "type": "box",
+                "layout": "horizontal",
+                "contents": [
+                  {
+                    "type": "button",
+                    "action": {
+                      "type": "message",
+                      "label": "ยืนยัน",
+                      "text": "ยืนยัน"
+                    },
+                    "color": "#4EC322",
+                    "style": "primary"
+                  },
+                  {
+                    "type": "button",
+                    "action": {
+                      "type": "message",
+                      "label": "ยกเลิก",
+                      "text": "ยกเลิก"
+                    },
+                    "color": "#D2D0D0",
+                    "style": "secondary"
+                  }
+                ]
+              }
+            ]
+          },
+          "styles": {
+            "header": {
+              "backgroundColor": "#DDDDDD"
+            },
+            "body": {
+              "backgroundColor": "#FFFFFF"
+            }
+          }
+        }
+      }
+    ))
+  }
 
-    let intentMap = new Map();
-    intentMap.set('Default Welcome Intent', welcome);
-    intentMap.set('Default Fallback Intent', fallback);
-    intentMap.set('Registration', getReg);
-    intentMap.set('Order', checkMenu);
-    // intentMap.set('<INTENT_NAME_HERE>', yourFunctionHandler);
-    // intentMap.set('<INTENT_NAME_HERE>', googleAssistantHandler);
-    agent.handleRequest(intentMap);
-  });
+  function orderYes(agent) {
+    saveOrder(userId)
+    agent.add("บันทึกเรียบร้อยแล้ว")
+    menuList[userId] = []
+    total[userId] = 0
+    orderList[userId].orderBy = ""
+    orderList[userId].orderKeyList = []
+    orderList[userId].location1 = ""
+    orderList[userId].location2 = ""
+    orderList[userId].tel = ""
+    orderList[userId].status = ""
+  }
+
+  function cancelOrder(agent) {
+    orderList[userId].orderBy = ""
+    orderList[userId].orderKeyList = []
+    orderList[userId].location1 = ""
+    orderList[userId].location2 = ""
+    orderList[userId].tel = ""
+    orderList[userId].status = ""
+    menuList[userId] = []
+    total[userId] = 0
+    agent.add("ลบเรียบร้อยแล้วครับ")
+    agent.add(JSON.stringify(orderList[userId]))
+  }
+
+  let intentMap = new Map();
+  intentMap.set('Default Welcome Intent', welcome);
+  intentMap.set('Default Fallback Intent', fallback);
+  intentMap.set('Registration', getReg);
+  intentMap.set('Order', checkMenu);
+  intentMap.set('Check Order', getOrder);
+  intentMap.set('Cancel Order', cancelOrder);
+  intentMap.set('Ask Name', askName);
+  intentMap.set('Ask Telephone', askTel);
+  intentMap.set('Ask Location 1', askLo1);
+  intentMap.set('Ask Location 2', askLo2);
+  intentMap.set('Confirm order - Yes', orderYes);
+
+  //intentMap.set('Ask Name - yes', saveName);
+  // intentMap.set('<INTENT_NAME_HERE>', yourFunctionHandler);
+  // intentMap.set('<INTENT_NAME_HERE>', googleAssistantHandler);
+  agent.handleRequest(intentMap);
+});
 
 
 exports.LineAdapter = functions.https.onRequest((req, res) => {
@@ -121,7 +353,7 @@ exports.LineAdapter = functions.https.onRequest((req, res) => {
 
       req.headers["x-line-signature"] = hash
       postToDialogflow(req);
-      reply(req);
+      //reply(req);
     }
     else {
       //reply(req);
@@ -157,3 +389,40 @@ const postToDialogflow = req => {
   });
 };
 
+const getMenuKey = (menuName) => {
+  return new Promise((resolve, reject) => {
+    return admin.database().ref('menu').orderByChild("name").equalTo(menuName).on('value', function (snapshot) {
+      //snapshot would have list of NODES that satisfies the condition
+      //agent.add(JSON.stringify(snapshot.val()))
+      if (snapshot.val() != null) {
+        snapshot.forEach(function (childSnapshot) {
+          var key = childSnapshot.key;
+          var childData = childSnapshot.val();
+          //console.log(key + ", " + JSON.stringify(childData));
+          resolve({ key, ...childData })
+        });
+      }
+      else {
+        reject("ไม่พบข้อมูลของ " + menuName)
+      }
+
+    });
+  })
+
+}
+
+
+const saveOrder = (userId) => {
+  let db = admin.database().ref("order")
+
+  db.push().update(
+    orderList[userId]
+  )
+  orderList[userId] = {}
+  menuList[userId] = []
+  total[userId] = 0
+}
+
+const sendAsPayload = (json) => {
+  return new Payload(`LINE`, json, { sendAsMessage: true })
+}
