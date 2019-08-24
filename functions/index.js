@@ -26,6 +26,7 @@ let order = {
   "location1": "",
   "location2": "",
   "tel": "",
+  "lineProfile": {},
   "status": "wait"
 }
 let orderList = {}
@@ -39,7 +40,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   const userId = request.body.originalDetectIntentRequest.payload.data.source.userId
   orderList[userId] = order
   //menuList[userId] = []
-  //total[userId] = ""
+  //total[userId] = 0
 
   function welcome(agent) {
     agent.add(`Welcome to my agent!`);
@@ -51,7 +52,10 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   }
 
   function getReg(agent) {
-    agent.add(userId)
+    //agent.add(userId)
+    return getUserInfo(userId).then(body => {
+      agent.add(body)
+    });
   }
   function getOrder(agent) {
     agent.add(JSON.stringify(orderList[userId]))
@@ -68,61 +72,70 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
       //saveOrder(userId, data)
       console.log(data);
 
-      orderList[userId].orderKeyList.push(
-        {
-          "key": data.key,
-          "amount": amount + "",
-          "note": note
-        }
-      )
+      let check = orderList[userId].orderKeyList.find((cur) => {
+        return cur.key == data.key
+      })
+      if (check == undefined) {
+        orderList[userId].orderKeyList.push(
+          {
+            "key": data.key,
+            "amount": amount + "",
+            "note": note
+          }
+        )
 
-      menuList[userId] = (menuList[userId] == null ? [] : menuList[userId])
-      menuList[userId].push(
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": menuName,
-              "align": "start"
-            },
-            {
-              "type": "text",
-              "text": amount + "",
-              "align": "end"
-            },
-            {
-              "type": "text",
-              "text": data.price + "",
-              "align": "end"
-            }
-          ]
-        }
-      )
-      total[userId] = (total[userId] == 0 ? 0 : total[userId])
-      total[userId] = total[userId] + (amount * data.price)
-      agent.add("บันทึกเมนู " + menuName + " จำนวน " + amount + " " + note + " เรียบร้อยแล้ว")
-      agent.add(sendAsPayload({
-        "type": "template",
-        "altText": "ข้อความยืนยัน",
-        "template": {
-          "type": "confirm",
-          "actions": [
-            {
-              "type": "message",
-              "label": "ใช่",
-              "text": "ใช่"
-            },
-            {
-              "type": "message",
-              "label": "ไม่",
-              "text": "ไม่"
-            }
-          ],
-          "text": "คุณต้องการสั่งเพิ่มเติมหรือไม่ ?"
-        }
-      }))
+        menuList[userId] = (menuList[userId] == null ? [] : menuList[userId])
+        menuList[userId].push(
+          {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+              {
+                "type": "text",
+                "text": menuName,
+                "align": "start"
+              },
+              {
+                "type": "text",
+                "text": amount + "",
+                "align": "end"
+              },
+              {
+                "type": "text",
+                "text": data.price + "",
+                "align": "end"
+              }
+            ]
+          }
+        )
+        total[userId] = (total[userId] != 0 ? total[userId] : 0)
+        total[userId] = Number(total[userId]) + (Number(amount) * Number(data.price))
+        agent.add("บันทึกเมนู " + menuName + " จำนวน " + amount + " " + note + " เรียบร้อยแล้ว")
+        agent.add(sendAsPayload({
+          "type": "template",
+          "altText": "ข้อความยืนยัน",
+          "template": {
+            "type": "confirm",
+            "actions": [
+              {
+                "type": "message",
+                "label": "ใช่",
+                "text": "ใช่"
+              },
+              {
+                "type": "message",
+                "label": "ไม่",
+                "text": "ไม่"
+              }
+            ],
+            "text": "คุณต้องการสั่งเพิ่มเติมหรือไม่ ?"
+          }
+        }))
+      }
+      else {
+        agent.add("คุณสั่ง " + menuName + " ไปแล้ว")
+      }
+
 
     },
       (err) => {
@@ -163,8 +176,8 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
 
     //agent.add(JSON.stringify(orderList[userId]))
     console.log(JSON.stringify(menuList[userId]))
-    console.log(total[userId]);
-    
+    console.log(total[userId] + " " + typeof (total[userId]));
+
     agent.add(sendAsPayload(
       {
         "type": "flex",
@@ -220,7 +233,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
               },
               {
                 "type": "text",
-                "text": "รวม :  " + total[userId] + " บาท",
+                "text": "รวม :  " + Number(total[userId]) + " บาท",
                 "align": "end"
               }
             ]
@@ -271,16 +284,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   }
 
   function orderYes(agent) {
-    saveOrder(userId)
+
+    //saveOrder(userId)
     agent.add("บันทึกเรียบร้อยแล้ว")
-    menuList[userId] = []
-    total[userId] = 0
-    orderList[userId].orderBy = ""
-    orderList[userId].orderKeyList = []
-    orderList[userId].location1 = ""
-    orderList[userId].location2 = ""
-    orderList[userId].tel = ""
-    orderList[userId].status = ""
+    return getUserInfo(userId).then(body => {
+      orderList[userId].lineProfile = JSON.parse(body)
+      saveOrder(userId)
+    });
   }
 
   function cancelOrder(agent) {
@@ -289,7 +299,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     orderList[userId].location1 = ""
     orderList[userId].location2 = ""
     orderList[userId].tel = ""
-    orderList[userId].status = ""
+    orderList[userId].lineProfile = {}
     menuList[userId] = []
     total[userId] = 0
     agent.add("ลบเรียบร้อยแล้วครับ")
@@ -320,7 +330,6 @@ exports.LineAdapter = functions.https.onRequest((req, res) => {
   if (req.method === "POST") {
     let event = req.body.events[0]
     if (event.type === "message" && event.message.type === "text") {
-
       postToDialogflow(req);
       //reply(req);
     }
@@ -356,11 +365,36 @@ exports.LineAdapter = functions.https.onRequest((req, res) => {
       //reply(req);
     }
     else {
-      //reply(req);
+      reply(req);
     }
   }
   return res.status(200).send(req.method);
 });
+
+exports.LineMessagingAPI = functions.https.onRequest((req, res) => {
+  //console.log(req.body);
+  res.header('Access-Control-Allow-Methods', 'POST');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  linePush(req.body.userId, req.body.messages)
+  return res.status(200).send(req.body);
+});
+
+const linePush = (userId, text) => {
+  return request.post({
+    headers: LINE_HEADER,
+    uri: LINE_MESSAGING_API + "/" + "push",
+    body: JSON.stringify({
+      "to": userId,
+      "messages": [
+        {
+          "type": "text",
+          "text": text
+        }
+      ]
+    })
+  })
+}
 
 const reply = req => {
   console.log(JSON.stringify(req.headers) + JSON.stringify(req.body));
@@ -373,7 +407,7 @@ const reply = req => {
       messages: [
         {
           type: "text",
-          text: req.body.events[0].message.text
+          text: JSON.stringify(req.body)
         }
       ]
     })
@@ -411,18 +445,35 @@ const getMenuKey = (menuName) => {
 
 }
 
-
 const saveOrder = (userId) => {
-  let db = admin.database().ref("order")
 
+  let db = admin.database().ref("order")
+  orderList[userId].timestamp = Date.now();
   db.push().update(
     orderList[userId]
-  )
-  orderList[userId] = {}
-  menuList[userId] = []
-  total[userId] = 0
+  ).then(() => {
+    orderList[userId].orderBy = ""
+    orderList[userId].orderKeyList = []
+    orderList[userId].location1 = ""
+    orderList[userId].location2 = ""
+    orderList[userId].tel = ""
+    orderList[userId].lineProfile = {}
+    menuList[userId] = []
+    total[userId] = 0
+  })
+
 }
 
 const sendAsPayload = (json) => {
   return new Payload(`LINE`, json, { sendAsMessage: true })
+}
+
+const getUserInfo = (userId) => {
+
+  return request.get({
+    uri: "https://api.line.me/v2/bot/profile/" + userId,
+    headers: LINE_HEADER,
+    body: ""
+  })
+
 }
