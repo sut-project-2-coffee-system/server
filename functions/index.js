@@ -26,6 +26,7 @@ let order = {
   "location1": "",
   "location2": "",
   "tel": "",
+  "pay":"ยังไม่จ่าย",
   "lineProfile": {},
   "status": "wait"
 }
@@ -108,7 +109,12 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             ]
           }
         )
-        total[userId] = (total[userId] != 0 ? total[userId] : 0)
+        if(  total[userId] === undefined || total[userId] == null) 
+          total[userId] = 0
+
+        if(isNaN(amount) || isNaN(data.price) || isNaN(total[userId]))
+          agent.add("มีบางค่าไม่ใช่ตัวเลข amount: " + amount +" data.price: " + data.price + " total[userId]: "+ total[userId])
+        
         total[userId] = Number(total[userId]) + (Number(amount) * Number(data.price))
         agent.add("บันทึกเมนู " + menuName + " จำนวน " + amount + " " + note + " เรียบร้อยแล้ว")
         agent.add(sendAsPayload({
