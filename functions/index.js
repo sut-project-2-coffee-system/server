@@ -1,6 +1,9 @@
 'use strict';
 
 const functions = require('firebase-functions');
+const cors = require('cors')({ origin: true });
+const config = require('./config.json');
+const rp = require('request-promise');
 const { WebhookClient, Payload } = require('dialogflow-fulfillment');
 const { Card, Suggestion } = require('dialogflow-fulfillment');
 const admin = require('firebase-admin');
@@ -291,12 +294,48 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
 
   function orderYes(agent) {
 
-    //saveOrder(userId)
-    agent.add("บันทึกเรียบร้อยแล้ว")
-    return getUserInfo(userId).then(body => {
-      orderList[userId].lineProfile = JSON.parse(body)
-      saveOrder(userId)
+    let url = `https://sandbox-api-pay.line.me/v2/payments/request`;
+    let orderId = new Date().getTime().toString();
+    let payload = {
+      productImageUrl: 'https://obs.line-scdn.net/0hnL15US6nMWMMTBu52_ZONDAJPw57YjcrdHh3BiwcbVclKSIxMCsrUn5POAAmLH5mMyt_VnlJbAEn',
+      productName: "sut line pay",
+      amount: total[userId],
+      orderId: orderId,
+      currency: "THB",
+      confirmUrl: "https://us-central1-coffe-system-yiakpd.cloudfunctions.net/confirmPaymentServer",
+      langCd: "th",
+      confirmUrlType: "SERVER",
+    };
+    let headers = {
+      'X-LINE-ChannelId': '1622080626',
+      'X-LINE-ChannelSecret': '1d680f2ae3ab1a64aeae793df06db6ed',
+      'Content-Type': 'application/json',
+    };
+
+    return reservePaymentServer(url,headers,payload).then(function (response) {
+      if (response && response.returnCode === '0000' && response.info) {
+        // const data = req.body;
+        // const transactionId = response.info.transactionId;
+        // data.transactionId = transactionId;
+        console.log('reservePaymentServer ',response.info.paymentUrl.web)
+        agent.add("บันทึกเรียบร้อยแล้ว")
+        agent.add(response.info.paymentUrl.web)
+        getUserInfo(userId).then(body => {
+          orderList[userId].lineProfile = JSON.parse(body)
+          saveOrder(userId,orderId)
+        });
+        }
+      })
+      .catch(function (err) {
+        console.log('reservePaymentServer err', err);
     });
+
+    //saveOrder(userId)
+    // agent.add("บันทึกเรียบร้อยแล้ว")
+    // return getUserInfo(userId).then(body => {
+    //   orderList[userId].lineProfile = JSON.parse(body)
+    //   saveOrder(userId)
+    // });
   }
 
   function cancelOrder(agent) {
@@ -404,7 +443,6 @@ const linePush = (userId, text) => {
 
 const reply = req => {
   console.log(JSON.stringify(req.headers) + JSON.stringify(req.body));
-
   return request.post({
     uri: `${LINE_MESSAGING_API}/reply`,
     headers: LINE_HEADER,
@@ -450,12 +488,18 @@ const getMenuKey = (menuName) => {
   })
 
 }
+// function saveTx(orderId, object) {
+//   object['lastActionDate'] = Date.now();
+//   var txRef = database.ref("/transactions/" + orderId);
+//   return txRef.update(object);
+// }
 
-const saveOrder = (userId) => {
+const saveOrder = (userId,orderId) => {
 
-  let db = admin.database().ref("order")
+  let db = admin.database().ref("order").child(orderId)
+  orderList[userId].total = total[userId]
   orderList[userId].timestamp = Date.now();
-  db.push().update(
+  db.update(
     orderList[userId]
   ).then(() => {
     orderList[userId].orderBy = ""
@@ -464,6 +508,7 @@ const saveOrder = (userId) => {
     orderList[userId].location2 = ""
     orderList[userId].tel = ""
     orderList[userId].lineProfile = {}
+    orderList[userId].total = 0
     menuList[userId] = []
     total[userId] = 0
   })
@@ -483,3 +528,77 @@ const getUserInfo = (userId) => {
   })
 
 }
+
+const reservePaymentServer = (url,headers,payload) => {
+  return request.post({
+    uri: url,
+    headers: headers,
+    body: payload,
+    json: true
+  })
+}
+
+exports.confirmPaymentServer = functions.https.onRequest((req, res) => {
+  return cors(req, res, () => {
+    confirmPaymentServer(req, res);
+  });
+});
+
+
+function confirmPaymentServer(req, res) {
+  let { transactionId, orderId } = req.query;
+  console.log('confirmPaymentServer', JSON.stringify(req.query));
+  let url = `${config.linepay.api}/v2/payments/${transactionId}/confirm`;
+  let data;
+  getOrderInfo(orderId)
+    .then((orderInfo) => {
+      data = orderInfo;
+      let body = {
+        amount: data.total,
+        currency: 'THB',
+      };
+      let headers = {
+        'X-LINE-ChannelId': config.linepay.channelId,
+        'X-LINE-ChannelSecret': config.linepay.channelSecret,
+        'Content-Type': 'application/json',
+      };
+      return rp({
+        method: 'POST',
+        uri: url,
+        body: body,
+        headers,
+        json: true,
+      });
+    })
+    .then(function (response) {
+      console.log('confirmPaymentServer response', JSON.stringify(response));
+      if (response && response.returnCode === '0000' && response.info) {
+        console.log('ได้รับชำระเงินเรียบร้อยแล้ว')
+        data.pay = 'จ่ายแล้ว';
+        admin.database().ref("order").child(orderId).set(data)
+        console.log('log userId-----------',data.lineProfile.userId)
+        // line.pushMessage(data.userId, lineHelper.createTextMessage('ได้รับชำระเงินเรียบร้อยแล้ว'));
+        linePush(data.lineProfile.userId,'ได้รับชำระเงินเรียบร้อยแล้ว')
+      }
+      res.send(response);
+    })
+    .catch(function (err) {
+      console.log('confirmPaymentServer err', err);
+      res.status(400).send(err);
+    });
+};
+
+function getOrderInfo(orderId) {
+  return new Promise((resolve, reject) => {
+    let list = [];
+    var txRef = admin.database().ref("order").child(orderId).once("value", function (snapshot) {
+      list.push(snapshot.val());
+      if (list.length > 0) {
+        resolve(list[0]);
+      } else {
+        reject();
+      }
+    });
+  });
+}
+
