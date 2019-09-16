@@ -1,0 +1,7 @@
+{
+    "linepay": {
+        "api": "https://sandbox-api-pay.line.me",
+        "channelId": "1622080626",
+        "channelSecret": "1d680f2ae3ab1a64aeae793df06db6ed"
+      }
+}
