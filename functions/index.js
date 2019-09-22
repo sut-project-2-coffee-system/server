@@ -29,7 +29,7 @@ let order = {
   "location1": "",
   "location2": "",
   "tel": "",
-  "pay":"ยังไม่จ่าย",
+  "pay": "ยังไม่จ่าย",
   "lineProfile": {},
   "status": "wait"
 }
@@ -112,12 +112,12 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             ]
           }
         )
-        if(  total[userId] === undefined || total[userId] == null) 
+        if (total[userId] === undefined || total[userId] == null)
           total[userId] = 0
 
-        if(isNaN(amount) || isNaN(data.price) || isNaN(total[userId]))
-          agent.add("มีบางค่าไม่ใช่ตัวเลข amount: " + amount +" data.price: " + data.price + " total[userId]: "+ total[userId])
-        
+        if (isNaN(amount) || isNaN(data.price) || isNaN(total[userId]))
+          agent.add("มีบางค่าไม่ใช่ตัวเลข amount: " + amount + " data.price: " + data.price + " total[userId]: " + total[userId])
+
         total[userId] = Number(total[userId]) + (Number(amount) * Number(data.price))
         agent.add("บันทึกเมนู " + menuName + " จำนวน " + amount + " " + note + " เรียบร้อยแล้ว")
         agent.add(sendAsPayload({
@@ -312,23 +312,23 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
       'Content-Type': 'application/json',
     };
 
-    return reservePaymentServer(url,headers,payload).then(function (response) {
+    return reservePaymentServer(url, headers, payload).then(function (response) {
       if (response && response.returnCode === '0000' && response.info) {
         // const data = req.body;
         // const transactionId = response.info.transactionId;
         // data.transactionId = transactionId;
-        console.log('reservePaymentServer ',response.info.paymentUrl.web)
+        console.log('reservePaymentServer ', response.info.paymentUrl.web)
         agent.add("บันทึกเรียบร้อยแล้ว")
         agent.add(response.info.paymentUrl.web)
         getUserInfo(userId).then(body => {
           orderList[userId].lineProfile = JSON.parse(body)
-          saveOrder(userId,orderId)
+          saveOrder(userId, orderId)
         });
-        }
-      })
+      }
+    })
       .catch(function (err) {
         console.log('reservePaymentServer err', err);
-    });
+      });
 
     //saveOrder(userId)
     // agent.add("บันทึกเรียบร้อยแล้ว")
@@ -494,25 +494,53 @@ const getMenuKey = (menuName) => {
 //   return txRef.update(object);
 // }
 
-const saveOrder = (userId,orderId) => {
-
-  let db = admin.database().ref("order").child(orderId)
-  orderList[userId].total = total[userId]
-  orderList[userId].timestamp = Date.now();
-  db.update(
-    orderList[userId]
-  ).then(() => {
-    orderList[userId].orderBy = ""
-    orderList[userId].orderKeyList = []
-    orderList[userId].location1 = ""
-    orderList[userId].location2 = ""
-    orderList[userId].tel = ""
-    orderList[userId].lineProfile = {}
-    orderList[userId].total = 0
-    menuList[userId] = []
-    total[userId] = 0
+const saveOrder = (userId, orderId) => {
+  let member = admin.database().ref('member')
+  member.orderByChild('userId').equalTo(userId).once('value', function (snapshot) {
+    if (snapshot.val() === null) {
+      admin.database().ref("member").push({
+        displayName:  orderList[userId].lineProfile.displayName,
+        userId:  orderList[userId].lineProfile.userId,
+        pictureUrl:  orderList[userId].lineProfile.pictureUrl,
+        statusMessage:  orderList[userId].lineProfile.statusMessage,
+        point: 0
+      }).then((snap) => {
+        orderList[userId].total = total[userId]
+        orderList[userId].timestamp = Date.now();
+        orderList[userId].lineProfile = snap.key
+        admin.database().ref("order").child(orderId).update(orderList[userId]).then(() => {
+          orderList[userId].orderBy = ""
+          orderList[userId].orderKeyList = []
+          orderList[userId].location1 = ""
+          orderList[userId].location2 = ""
+          orderList[userId].tel = ""
+          orderList[userId].lineProfile = {}
+          orderList[userId].total = 0
+          menuList[userId] = []
+          total[userId] = 0
+        })
+      })
+    }
+    else {
+      let db = admin.database().ref("order").child(orderId)
+      orderList[userId].total = total[userId]
+      orderList[userId].timestamp = Date.now();
+      orderList[userId].lineProfile = Object.keys(snapshot.val())[0]
+      db.update(
+        orderList[userId]
+      ).then(() => {
+        orderList[userId].orderBy = ""
+        orderList[userId].orderKeyList = []
+        orderList[userId].location1 = ""
+        orderList[userId].location2 = ""
+        orderList[userId].tel = ""
+        orderList[userId].lineProfile = {}
+        orderList[userId].total = 0
+        menuList[userId] = []
+        total[userId] = 0
+      })
+    }
   })
-
 }
 
 const sendAsPayload = (json) => {
@@ -529,7 +557,7 @@ const getUserInfo = (userId) => {
 
 }
 
-const reservePaymentServer = (url,headers,payload) => {
+const reservePaymentServer = (url, headers, payload) => {
   return request.post({
     uri: url,
     headers: headers,
@@ -574,11 +602,17 @@ function confirmPaymentServer(req, res) {
       console.log('confirmPaymentServer response', JSON.stringify(response));
       if (response && response.returnCode === '0000' && response.info) {
         console.log('ได้รับชำระเงินเรียบร้อยแล้ว')
-        data.pay = 'จ่ายแล้ว';
-        admin.database().ref("order").child(orderId).set(data)
-        console.log('log userId-----------',data.lineProfile.userId)
-        // line.pushMessage(data.userId, lineHelper.createTextMessage('ได้รับชำระเงินเรียบร้อยแล้ว'));
-        linePush(data.lineProfile.userId,'ได้รับชำระเงินเรียบร้อยแล้ว')
+        console.log('data == ',data)
+        data.pay = 'จ่ายแล้ว'
+        admin.database().ref("order").child(orderId).update(data)
+
+        admin.database().ref('member').child(data.lineProfile).once('value', function (snapshot) {
+          console.log('snapshot.val().userId === ',snapshot.val().userId)
+          admin.database().ref('member').child(data.lineProfile).update({
+            point : snapshot.val().point + 1
+          })
+          linePush(snapshot.val().userId, 'ได้รับชำระเงินเรียบร้อยแล้ว')
+        })
       }
       res.send(response);
     })
