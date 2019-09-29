@@ -608,8 +608,9 @@ function confirmPaymentServer(req, res) {
 
         admin.database().ref('member').child(data.lineProfile).once('value', function (snapshot) {
           console.log('snapshot.val().userId === ',snapshot.val().userId)
+          let point = data.total >= 20 ? Math.floor(data.total / 20) : 0
           admin.database().ref('member').child(data.lineProfile).update({
-            point : snapshot.val().point + 1
+            point : snapshot.val().point + point
           })
           linePush(snapshot.val().userId, 'ได้รับชำระเงินเรียบร้อยแล้ว')
         })
