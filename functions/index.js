@@ -172,7 +172,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     let long = request.body.queryResult.parameters.long
     let location = request.body.queryResult.parameters.location
 
-    orderList[userId].location1 = location
+    orderList[userId].location1 = location + ", latitude : " + lat + ", longitude : "+ long
     agent.add("บันทึกที่อยู่ของคุณ " + location + " เรียบร้อยแล้ว")
     agent.add("กรุณาส่ง ที่อยู่เพิ่มเติมของคุณด้วย")
   }
